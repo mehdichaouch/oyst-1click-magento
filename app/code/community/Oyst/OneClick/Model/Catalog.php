@@ -343,11 +343,13 @@ class Oyst_OneClick_Model_Catalog extends Mage_Core_Model_Abstract
 
             $this->addComplexAttributes($product, $oystProduct);
             $this->addImages($product, $oystProduct);
-            $this->addCustomAttributesToInformation($product, $oystProduct);
+            $this->addCustomAttributesToInformations($product, $oystProduct);
 
             if ($product->isConfigurable()) {
                 $this->addVariations($product, $oystProduct);
             }
+
+            $this->addProductCustomOptionsToInformations($oystProduct);
 
             // @TODO Temporary code, waiting to allow any kind of field in product e.g. variation_reference
             // in release stock event
@@ -490,164 +492,38 @@ class Oyst_OneClick_Model_Catalog extends Mage_Core_Model_Abstract
     }
 
     /**
-     * Add price to product
+     * Add price to oyst product.
      *
      * @param Mage_Catalog_Model_Product $product
      * @param OystProduct $oystProduct
      */
     protected function addAmount(Mage_Catalog_Model_Product $product, OystProduct &$oystProduct)
     {
-        $prices = $this->getPrices($product);
-        $oystPriceIncludingTaxes = new OystPrice($prices['price-including-tax'], $this->getCatalogBaseCurrencyCode());
+        $data = array();
+
+        /** @var Mage_Sales_Model_Quote $quote */
+        $quote = Mage::registry('oyst-quote');
+
+        if (is_null($quote)) {
+            /** @var Mage_Checkout_Model_Session $oystRelatedQuoteId */
+            $oystRelatedQuoteId = Mage::getSingleton('checkout/session')->getOystRelatedQuoteId();
+
+            $quote = Mage::getModel('sales/quote')->load($oystRelatedQuoteId);
+        }
+
+        /** @var Mage_Sales_Model_Quote_Item $quoteItem */
+        foreach ($quote->getAllVisibleItems() as $quoteItem) {
+            if ($product->getId() == $quoteItem->getProductId()) {
+                /** @var Mage_Checkout_Helper_Data $checkout */
+                $checkout = Mage::helper('checkout');
+
+                $data['price-including-tax'] = round($checkout->getPriceInclTax($quoteItem), 2);
+                break;
+            }
+        }
+
+        $oystPriceIncludingTaxes = new OystPrice($data['price-including-tax'], $this->getCatalogBaseCurrencyCode());
         $oystProduct->__set('amountIncludingTax', $oystPriceIncludingTaxes);
-
-        if (isset($prices['price-excluding-tax'])) {
-            $oystPriceExcludingTaxes = new OystPrice($prices['price-excluding-tax'], $this->getCatalogBaseCurrencyCode());
-            $oystProduct->__set('amount_excluding_taxes', $oystPriceExcludingTaxes->toArray());
-        }
-    }
-
-    /**
-     * Get prices
-     *
-     * @param Mage_Catalog_Model_Product $product
-     * @param Mage_Catalog_Model_Product $configurable
-     * @param integer $storeId
-     *
-     * @return array
-     */
-    protected function getPrices(Mage_Catalog_Model_Product $product, $storeId = null)
-    {
-        $store = Mage::app()->getStore($storeId);
-        $priceIncludesTax = Mage::helper('tax')->priceIncludesTax($store);
-
-        $calculator = Mage::getSingleton('tax/calculation');
-        $taxClassId = $product->getTaxClassId();
-        $request = $calculator->getRateRequest(null, null, null, $store);
-        $taxPercent = $calculator->getRate($request->setProductClassId($taxClassId));
-
-        $price = $product->getPrice();
-        $finalPrice = $product->getFinalPrice();
-
-        if ($product->isConfigurable()) {
-            $price = $product->getPrice();
-            $finalPrice = $product->getFinalPrice();
-            $configurablePrice = 0;
-            $configurableOldPrice = 0;
-
-            $attributes = $product->getTypeInstance(true)->getConfigurableAttributes($product);
-            $attributes = Mage::helper('core')->decorateArray($attributes);
-            if ($attributes) {
-                foreach ($attributes as $attribute) {
-                    $productAttribute = $attribute->getProductAttribute();
-
-                    if ($this->isPreload) {
-                        $attributeValue = Mage::getResourceModel('catalog/product')->getAttributeRawValue($this->configurableProductChildId, $productAttribute->getAttributeCode(), $storeId);
-                    } else {
-                        $attributeValue = $this->products[$product->getId()]['childProduct']->getData($productAttribute->getAttributeCode());
-                    }
-
-                    // @codingStandardsIgnoreLine
-                    if (count($attribute->getPrices()) > 0) {
-                        foreach ($attribute->getPrices() as $priceChange) {
-                            if (is_array($priceChange) && array_key_exists('value_index', $priceChange) &&
-                                $priceChange['value_index'] == $attributeValue
-                            ) {
-                                $configurableOldPrice += (float)($priceChange['is_percent'] ?
-                                    (((float)$priceChange['pricing_value']) * $price / 100) :
-                                    $priceChange['pricing_value']);
-                                $configurablePrice += (float)($priceChange['is_percent'] ?
-                                    (((float)$priceChange['pricing_value']) * $finalPrice / 100) :
-                                    $priceChange['pricing_value']);
-                            }
-                        }
-                    }
-                }
-            }
-            $product->setConfigurablePrice($configurablePrice);
-            $product->setParentId(true);
-            Mage::dispatchEvent(
-                'catalog_product_type_configurable_price',
-                array('product' => $product)
-            );
-
-            $configurablePrice = $product->getConfigurablePrice();
-            $productType = $product;
-
-            if (Mage::getStoreConfig('oyst/oneclick/configurable_price')) {
-                $productType = Mage::getModel('catalog/product')->load($this->configurableProductChildId);
-            }
-
-            $price = $productType->getPrice() + $configurableOldPrice;
-            $finalPrice = $productType->getFinalPrice() + $configurablePrice;
-        }
-
-        if ($product->isGrouped()) {
-            $price = 0;
-            $finalPrice = 0;
-            $childs = Mage::getModel('catalog/product_type_grouped')->getChildrenIds($product->getId());
-            $childs = $childs[Mage_Catalog_Model_Product_Link::LINK_TYPE_GROUPED];
-            foreach ($childs as $value) {
-                $price += Mage::getResourceModel('catalog/product')->getAttributeRawValue($value, 'price', $store->getId());
-                $finalPrice += Mage::getResourceModel('catalog/product')->getAttributeRawValue($value, 'final_price', $store->getId());
-            }
-            $priceIncludingTax = Mage::helper('tax')->getPrice(
-                $product->setTaxPercent(null),
-                $price,
-                true
-            );
-            $finalPriceIncludingTax = Mage::helper('tax')->getPrice(
-                $product->setTaxPercent(null),
-                $finalPrice,
-                true
-            );
-        }
-
-        $priceIncludingTax = $price;
-        $finalPriceIncludingTax = $finalPrice;
-        if (!$priceIncludesTax) {
-            $data['price-excluding-tax'] = round($finalPrice, 2);
-            $priceIncludingTax = $price + $calculator->calcTaxAmount($price, $taxPercent, false);
-            $finalPriceIncludingTax = $finalPrice + $calculator->calcTaxAmount($finalPrice, $taxPercent, false);
-        }
-
-        if (Mage::getStoreConfig(Mage_Weee_Helper_Data::XML_PATH_FPT_ENABLED)) {
-            $amount = Mage::getModel('weee/tax')->getWeeeAmount($product, null, null, $storeId);
-            $priceIncludingTax += $amount;
-            $finalPriceIncludingTax += $amount;
-        }
-
-        // Get prices
-        $data['price-including-tax'] = round($finalPriceIncludingTax, 2);
-        $data['price-before-discount'] = round($priceIncludingTax, 2);
-        $discountAmount = $priceIncludingTax - $finalPriceIncludingTax;
-        $data['discount-amount'] = $discountAmount > 0 ? round($discountAmount, 2) : '0';
-        $data['discount-percent'] = $discountAmount > 0 ? round(
-            ($discountAmount * 100) / $priceIncludingTax,
-            0
-        ) : '0';
-        $data['start-date-discount'] = $product->getSpecialFromDate();
-        $data['end-date-discount'] = $product->getSpecialToDate();
-
-        // Retrieving promotions
-        $dateTs = Mage::app()->getLocale()->storeTimeStamp($product->getStoreId());
-        if (method_exists(Mage::getResourceModel('catalogrule/rule'), 'getRulesFromProduct')) {
-            $promo = Mage::getResourceModel('catalogrule/rule')->getRulesFromProduct($dateTs, $product->getStoreId(), 1, $product->getId());
-        } elseif (method_exists(Mage::getResourceModel('catalogrule/rule'), 'getRulesForProduct')) {
-            $promo = Mage::getResourceModel('catalogrule/rule')->getRulesForProduct($dateTs, $product->getStoreId(), $product->getId());
-        }
-
-        if (count($promo)) {
-            $promo = $promo[0];
-
-            $from = isset($promo['from_time']) ? $promo['from_time'] : $promo['from_date'];
-            $to = isset($promo['to_time']) ? $promo['to_time'] : $promo['to_date'];
-
-            $data['start-date-discount'] = date('Y-m-d H:i:s', strtotime($from));
-            $data['end-date-discount'] = null === $to ? '' : date('Y-m-d H:i:s', strtotime($to));
-        }
-
-        return $data;
     }
 
     /**
@@ -733,13 +609,12 @@ class Oyst_OneClick_Model_Catalog extends Mage_Core_Model_Abstract
     }
 
     /**
-     * Add custom attributes to product information field
+     * Add custom attributes to oyst product informations.
      *
      * @param Mage_Catalog_Model_Product $product
      * @param OystProduct $oystProduct
-     * @param array $userDefinedAttributeCode
      */
-    protected function addCustomAttributesToInformation(Mage_Catalog_Model_Product $product, OystProduct &$oystProduct)
+    protected function addCustomAttributesToInformations(Mage_Catalog_Model_Product $product, OystProduct &$oystProduct)
     {
         $attributeCodes = $this->getProductAttributeCodeDefinedByUser($product, $this->userDefinedAttributeCode);
 
@@ -764,6 +639,39 @@ class Oyst_OneClick_Model_Catalog extends Mage_Core_Model_Abstract
             $informations[$attributeCode] = $value;
         }
         $oystProduct->__set('informations', $informations);
+    }
+
+    /**
+     * Add product custom options to oyst product informations.
+     *
+     * @param OystProduct $oystProduct
+     */
+    protected function addProductCustomOptionsToInformations(OystProduct &$oystProduct)
+    {
+        /** @var Mage_Sales_Model_Quote $quote */
+        $quote = Mage::registry('oyst-quote');
+
+        if (is_null($quote)) {
+            /** @var Mage_Checkout_Model_Session $oystRelatedQuoteId */
+            $oystRelatedQuoteId = Mage::getSingleton('checkout/session')->getOystRelatedQuoteId();
+
+            $quote = Mage::getModel('sales/quote')->load($oystRelatedQuoteId);
+        }
+
+        $productOptions = array();
+
+        foreach ($quote->getAllVisibleItems() as $quoteItem) {
+            /* @var $helper Mage_Catalog_Helper_Product_Configuration */
+            $helper = Mage::helper('catalog/product_configuration');
+            // @codingStandardsIgnoreLine
+            $options = $helper->getConfigurableOptions($quoteItem);
+
+            foreach ($options as $option) {
+                $productOptions[$option['label']] = $option['value'];
+            }
+        }
+
+        $oystProduct->__set('informations', array_merge($oystProduct->__get('informations'), $productOptions));
     }
 
     /**

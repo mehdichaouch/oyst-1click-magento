@@ -226,6 +226,7 @@ class Oyst_OneClick_Model_OneClick_ApiWrapper extends Oyst_OneClick_Model_Api
             || $this->quote->getId() != $dataFormated['quoteId']
         ) {
             $this->quote = Mage::getModel('sales/quote')->load($dataFormated['quoteId']);
+            Mage::register('oyst-quote', $this->quote, true);
         }
 
         /** @var Mage_Sales_Model_Quote $items */
