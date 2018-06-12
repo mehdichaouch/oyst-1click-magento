@@ -45,7 +45,6 @@ env:
   global:
     - MAGENTO_DB_ALLOWSAME=1
     - SKIP_CLEANUP=1
-    - TEST_BASEDIR=.modman/oyst-magento/app/code/community/Oyst/Oyst/Test
   matrix:
     - MAGENTO_VERSION="magento-mirror-1.6.2.0"
     - MAGENTO_VERSION="magento-mirror-1.7.0.2"
@@ -67,7 +66,7 @@ install:
 
 script:
   - mkdir -p build/logs
-  - curl --retry 2 --retry-delay 5 -H "Authorization":"token $GITHUB_TOKEN" -f -sSL https://raw.githubusercontent.com/mehdichaouch/MageTestStand/master/setup.sh | bash
+  - curl --retry 2 --retry-delay 5 -H "Authorization":"token $GITHUB_TOKEN" -f -sSL https://raw.githubusercontent.com/AOEpeople/MageTestStand//master/setup.sh | bash
   ## PHP CodeSniffer disable error on exit
   - vendor/bin/phpcs --config-set ignore_warnings_on_exit 1
   ## PHP Copy/Paste Detector
@@ -102,7 +101,21 @@ script:
   ## PHPCompatibility
   - vendor/bin/phpcs --config-set installed_paths vendor/wimg/php-compatibility && vendor/bin/phpcs --standard=PHPCompatibility --extensions=php,phtml --ignore=lib,vendor --runtime-set testVersion $TRAVIS_PHP_VERSION $TRAVIS_BUILD_DIR
 
-notifications:
-  email:
-    on_success: never  # options: [always|never|change] default: always
-    on_failure: never  # options: [always|never|change] default: always
+before_deploy:
+  - ./bin/update_magento_version.sh
+  - ./bin/build_magento_package.sh
+
+after_deploy:
+  - ./bin/clean_release.sh
+#  - ./bin/notification.sh "*New Release $TRAVIS_TAG* https://github.com/oystparis/oyst-1click-magento/releases/download/$TRAVIS_TAG/Oyst_OneClick-${TRAVIS_TAG#v}.tgz"
+
+deploy:
+  provider: releases
+  api_key: $GITHUB_TOKEN
+  skip_cleanup: true
+  file_glob: true
+  file: $TRAVIS_BUILD_DIR/travis_release/Oyst_OneClick-*.tgz
+  on:
+    condition: "$AUTO_DEPLOY = true"
+    repo: oystparis/oyst-1click-magento
+    tags: true
