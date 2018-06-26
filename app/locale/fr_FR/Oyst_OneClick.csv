@@ -39,7 +39,6 @@
 "Enable native form validator to add to cart","Activer le validateur natif de formulaire d'ajout au panier"
 "To use a custom validator, disable and implement a javascript function isCustomProductAddtocartFormValid","Pour utiliser un validateur custom, désactiver et implémenter une fonction javascript isCustomProductAddtocartFormValid"
 "Allow the customer to change the quantity of purchases in the payment modal","Autoriser le client à modifier la quantité des achats depuis la modale de paiement"
-"Should ask stock","Intérroger le stock"
 "Enable invoice auto-generation","Activer la génération automatique de la facture"
 "<b>Yes</b> creation of the invoice when the order is created, the ""Due amount"" will be 0.<br/><b>No</b> the order remains with a ""Due amount"" and the invoice is not created.","<b>Oui</b> création de la facture à la création de la commande, le ""Montant dû"" sera à 0.<br><b>Non</b> la commande reste avec un ""Montant dû"" et la facture n'est pas créée."
 "Button theme","Thème du bouton"

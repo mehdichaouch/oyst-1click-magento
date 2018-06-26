@@ -13,7 +13,6 @@ use Oyst\Classes\OneClickItem;
 use Oyst\Classes\OneClickMerchantDiscount;
 use Oyst\Classes\OneClickOrderCartEstimate;
 use Oyst\Classes\OneClickShipmentCatalogLess;
-use Oyst\Classes\OneClickStock;
 use Oyst\Classes\OystCarrier;
 use Oyst\Classes\OystCategory;
 use Oyst\Classes\OystPrice;
@@ -87,11 +86,6 @@ class Oyst_OneClick_Model_Catalog extends Mage_Core_Model_Abstract
     protected $configurableProductChildId = null;
 
     /**
-     * @var null|Mage_CatalogInventory_Model_Stock_Item
-     */
-    private $stockItem = null;
-
-    /**
      * Object construct
      */
     public function __construct()
@@ -133,16 +127,6 @@ class Oyst_OneClick_Model_Catalog extends Mage_Core_Model_Abstract
         switch ($event) {
             case 'order.cart.estimate':
                 $response = $this->cartEstimate($apiData);
-                break;
-
-            // Reduce qty in order or cancel booking
-            case 'order.stock.released':
-                $response = $this->stockReleased($apiData);
-                break;
-
-            // Increase qty in order
-            case 'order.stock.book':
-                $response = $this->stockBook($apiData);
                 break;
 
             default:
@@ -201,17 +185,7 @@ class Oyst_OneClick_Model_Catalog extends Mage_Core_Model_Abstract
                 $this->configurableProductChildId = $parentQuoteItem->getProductId();
             }
 
-            $quantity = $quoteItem->getQty();
             $oystProducts[] = $this->format($quoteItem);
-
-            // Book initial quantity
-            if ($this->getConfig('should_ask_stock') && 0 !== $quantity) {
-                $productId = isset($this->configurableProductChildId) ? $this->configurableProductChildId : $quoteItem->getProductId();
-                $this->stockItemToBook($productId, $quantity);
-                Mage::helper('oyst_oneclick')->log(
-                    sprintf('Book initial qty %s for productId %s', $quantity, $productId)
-                );
-            }
 
             $this->configurableProductChildId = null;
         }
@@ -247,7 +221,6 @@ class Oyst_OneClick_Model_Catalog extends Mage_Core_Model_Abstract
         $oystProduct->__set('reference', $product->getEntityId() . ';' . $quoteItem->getId());
 
         // @TODO Temporary code, waiting to allow any kind of field in product e.g. variation_reference
-        // in release stock event
         if ($product->isConfigurable()) {
             $oystProduct->__set('reference', $product->getId() . ';' . $quoteItem->getId() . ';' . $this->configurableProductChildId);
             $oystProduct->__set('variation_reference', $this->configurableProductChildId);
@@ -798,146 +771,6 @@ class Oyst_OneClick_Model_Catalog extends Mage_Core_Model_Abstract
     protected function getConfigMappingName($code, $storeId)
     {
         return Mage::getStoreConfig("oyst_oneclick/carrier_name/$code", $storeId);
-    }
-
-    /**
-     *
-     *
-     * @return mixed
-     */
-    private function stockReleased($apiData)
-    {
-        try {
-            if (!isset($apiData['products'])) {
-                throw new \InvalidArgumentException(Mage::helper('oyst_oneclick')->__('Products info is missing'));
-            }
-
-            foreach ($apiData['products'] as $product) {
-                $qty = isset($product['quantity']) ? $product['quantity'] : 1;
-
-                if (0 === $qty) {
-                    continue;
-                }
-
-                $productId = $product['reference'];
-
-                // @TODO Temporary code, waiting to allow any kind of field in product e.g. variation_reference
-                // in release stock event
-                if (false !== strpos($productId, ';')) {
-                    $p = explode(';', $productId);
-                    $product['reference'] = $p[0];
-                    $product['quote_item_id'] = $p[1];
-                    if (isset($p[2])) {
-                        $product['variation_reference'] = $p[2];
-                    }
-                }
-
-                if (isset($product['variation_reference'])) {
-                    $productId = $product['variation_reference'];
-                }
-
-                /** @var Mage_CatalogInventory_Model_Stock_Item stockItem */
-                $this->stockItem = Mage::getModel('cataloginventory/stock_item')->loadByProduct($productId);
-
-                if (!$this->stockItem->getId()) {
-                    $this->stockItem->setProductId($productId);
-                    $this->stockItem->setStockId(Mage::getModel('cataloginventory/stock')->getId());
-                }
-
-                if ($this->stockItem->getManageStock()) {
-                    $this->stockItem->setQty($this->stockItem->getQty() + $qty);
-                    $this->stockItem->setIsInStock((int)($qty > 0)); // Set the Product to InStock
-                    // @codingStandardsIgnoreLine
-                    $this->stockItem->save();
-                }
-            }
-        } catch (Exception $e) {
-            Mage::logException($e);
-        }
-    }
-
-    /**
-     * Book stock item(s)
-     *
-     * @return string
-     */
-    private function stockBook($apiData)
-    {
-        try {
-            if (isset($apiData['items'])) {
-                foreach ($apiData['items'] as $item) {
-                    $qty = $item['quantity'];
-                    $productId = $item['reference'];
-
-                    // @TODO Temporary code, waiting to allow any kind of field in product e.g. variation_reference
-                    // in release stock event
-                    if (false  !== strpos($productId, ';')) {
-                        $p = explode(';', $productId);
-                        $productId['reference'] = $p[0];
-                        $quoteItemId['quote_item_id'] = $p[1];
-                        if (isset($p[2])) {
-                            $item['variation_reference'] = $p[2];
-                        }
-                    }
-
-                    if (isset($item['variation_reference'])) {
-                        $productId = $item['variation_reference'];
-                    }
-
-                    $this->stockItemToBook($productId, $qty);
-                }
-            } else {
-                $qty = $apiData['quantity'];
-
-                $productId = $apiData['product_reference'];
-
-                // @TODO Temporary code, waiting to allow any kind of field in product e.g. variation_reference
-                // in release stock event
-                if (false  !== strpos($productId, ';')) {
-                    $p = explode(';', $productId);
-                    $productId = $p[0];
-                    $quoteItemId = $p[1];
-                    if (isset($p[2])) {
-                        $apiData['variation_reference'] = $p[2];
-                    }
-                }
-
-                if (isset($apiData['variation_reference'])) {
-                    $productId = $apiData['variation_reference'];
-                }
-
-                $stockItemToBook = $this->stockItemToBook($productId, $qty);
-
-                /** @var OneClickStock $stockBookResponse */
-                $stockBookResponse = new OneClickStock($stockItemToBook, $apiData['product_reference']);
-
-                return Zend_Json::encode($stockBookResponse->toArray());
-            }
-        } catch (Exception $e) {
-            Mage::logException($e);
-        }
-    }
-
-    /**
-     * Book a stock unit
-     *
-     * @return string
-     */
-    public function stockItemToBook($productId, $qty)
-    {
-        /** @var Mage_Catalog_Model_Product $product */
-        $product = Mage::getModel('catalog/product')->load($productId);
-
-        /** @var Mage_CatalogInventory_Model_Stock_Item stockItem */
-        $this->stockItem = $product->getStockItem();
-        $stockItemToBook = $this->stockItem->getQty() >= $qty ? $qty : 0;
-
-        if ($stockItemToBook) {
-            $this->stockItem->setData('qty', $this->stockItem->getQty() - $stockItemToBook);
-            $this->stockItem->save();
-        }
-
-        return $stockItemToBook;
     }
 
     public function getCatalogBaseCurrencyCode($storeId = null)

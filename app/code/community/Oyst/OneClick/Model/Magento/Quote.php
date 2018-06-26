@@ -377,12 +377,6 @@ class Oyst_OneClick_Model_Magento_Quote
             foreach (explode(';', $item['product']['reference']) as $productReference) {
                 $productReferences[] = array('ref' => $productReference, 'qty' => $item['quantity']);
             }
-
-            if (isset($item['product']['variation_reference'])) {
-                $this->handleIncreaseStock($item['product']['variation_reference'], $item['quantity']);
-            } else {
-                $this->handleIncreaseStock($item['product']['reference'], $item['quantity']);
-            }
         }
 
         $cartData = array();
@@ -407,38 +401,6 @@ class Oyst_OneClick_Model_Magento_Quote
         $cart = Mage::getSingleton('checkout/cart');
         $cartData = $cart->suggestItemsQty($cartData);
         $cart->updateItems($cartData)->save();
-
-        return $this;
-    }
-
-    private function handleIncreaseStock($productId, $qty)
-    {
-        // Increase stock with qty decreased when order was made if should_ask_stock is enabled
-        if (Mage::getStoreConfig('oyst/oneclick/should_ask_stock') &&
-            isset($this->apiData['event']) &&
-            'order.v2.new' === $this->apiData['event']) {
-            Mage::helper('oyst_oneclick')->log(
-                sprintf(
-                    'Increase stock of product_id %s with %s',
-                    $productId,
-                    $qty
-                )
-            );
-
-            /** @var Mage_CatalogInventory_Model_Stock_Item $stockItem */
-            $stockItem = Mage::getModel('cataloginventory/stock_item')->loadByProduct($productId);
-
-            $isStockManaged = $stockItem->getData('use_config_manage_stock') ?
-                Mage::getStoreConfig('cataloginventory/item_options/manage_stock') :
-                $stockItem->getData('manage_stock');
-
-            if ($isStockManaged) {
-                $stockItem->setData('is_in_stock', 1); // Set the Product to InStock
-                $stockItem->addQty($qty);
-                // @codingStandardsIgnoreLine
-                $stockItem->save();
-            }
-        }
 
         return $this;
     }

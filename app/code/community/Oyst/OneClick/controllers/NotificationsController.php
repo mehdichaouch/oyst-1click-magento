@@ -55,8 +55,6 @@ class Oyst_OneClick_NotificationsController extends Mage_Core_Controller_Front_A
                 break;
             // OneClick
             case 'order.cart.estimate':
-            case 'order.stock.book':
-            case 'order.stock.released':
                 $modelName = 'oyst_oneclick/catalog';
                 break;
             // FreePay
